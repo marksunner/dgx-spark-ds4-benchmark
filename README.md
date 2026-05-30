@@ -32,9 +32,26 @@
 
 Full pipelined prefill at 131K: **211.53 t/s** end-to-end (32 chunks, 620s total, 367 MiB/s network throughput).
 
+### 192K Context Sweep
+
+| Context  | Prefill (t/s) | Generation (t/s) |
+|---------:|:-------------:|:----------------:|
+| 2,048    | 118.77        | 11.33            |
+| 26,624   | 205.60        | 10.91            |
+| 51,200   | 197.23        | 10.22            |
+| 75,776   | 189.53        |  9.76            |
+| 100,352  | 182.70        |  9.37            |
+| 124,928  | 176.22        |  9.01            |
+| 149,504  | 169.67        |  8.63            |
+| 174,080  | 206.19        |  8.26            |
+
+Full pipelined prefill at 174K: **206.19 t/s** end-to-end.
+
+> ⏳ *196K data point in progress — final result incoming.*
+
 > The prefill numbers above are per-chunk incremental rates from `ds4-bench`. The full pipelined prefill at 65K context achieved **216.82 t/s** end-to-end thanks to pipeline parallelism across both Sparks.
 
-**Key takeaway:** Prefill scales well with pipeline parallelism (122–216 t/s depending on context length and pipeline depth). Generation degrades gracefully from ~11.4 t/s at 2K context to ~9.75 t/s at 84K — each token must traverse both machines sequentially, so the network hop plus growing KV cache is the cost. Still very usable for interactive chat even at 84K context.
+**Key takeaway:** Prefill scales well with pipeline parallelism (122–216 t/s depending on context length and pipeline depth). Generation degrades gracefully from ~11.4 t/s at 2K context down to ~8.3 t/s at 174K — each token must traverse both machines sequentially, so the network hop plus growing KV cache is the cost. Still usable for interactive chat and agent workloads across the full context range.
 
 ### Comparison Context
 
@@ -76,7 +93,7 @@ Note: ds4 uses **TCP** for distributed inference (not RDMA/RoCE). antirez explic
 - **GGUF file:** `DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf`
 - **Size:** 154 GB (too large for a single 128 GB Spark — dual-Spark is required)
 - **Source:** [antirez/deepseek-v4-gguf](https://huggingface.co/antirez/deepseek-v4-gguf) on HuggingFace
-- **Context window:** Up to 1M tokens (model capability); tested up to 128K+ here (sweep in progress)
+- **Context window:** Up to 1M tokens (model capability); tested up to 192K here
 
 ## Software
 
