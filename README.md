@@ -16,9 +16,22 @@
 | 59,392  | 151.19        | 10.04            |
 | 65,536  | 134.97        |  9.91            |
 
+### 128K Context Sweep
+
+| Context  | Prefill (t/s) | Generation (t/s) |
+|---------:|:-------------:|:----------------:|
+| 2,048    | 121.89        | 11.49            |
+| 18,432   | 193.97        | 11.26            |
+| 34,816   | 188.96        | 10.57            |
+| 51,200   | 183.27        | 10.35            |
+| 67,584   | 178.69        | 10.01            |
+| 83,968   | 174.29        |  9.75            |
+
+> ⏳ *128K sweep in progress — remaining data points (100K, 116K, 131K) incoming. 192K sweep to follow.*
+
 > The prefill numbers above are per-chunk incremental rates from `ds4-bench`. The full pipelined prefill at 65K context achieved **216.82 t/s** end-to-end thanks to pipeline parallelism across both Sparks.
 
-**Key takeaway:** Prefill scales well with pipeline parallelism (122–216 t/s depending on context length and pipeline depth). Generation degrades gracefully from ~11.4 t/s at 2K context to ~9.9 t/s at 65K — each token must traverse both machines sequentially, so the network hop plus growing KV cache is the cost. Still very usable for interactive chat.
+**Key takeaway:** Prefill scales well with pipeline parallelism (122–216 t/s depending on context length and pipeline depth). Generation degrades gracefully from ~11.4 t/s at 2K context to ~9.75 t/s at 84K — each token must traverse both machines sequentially, so the network hop plus growing KV cache is the cost. Still very usable for interactive chat even at 84K context.
 
 ### Comparison Context
 
@@ -60,7 +73,7 @@ Note: ds4 uses **TCP** for distributed inference (not RDMA/RoCE). antirez explic
 - **GGUF file:** `DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix.gguf`
 - **Size:** 154 GB (too large for a single 128 GB Spark — dual-Spark is required)
 - **Source:** [antirez/deepseek-v4-gguf](https://huggingface.co/antirez/deepseek-v4-gguf) on HuggingFace
-- **Context window:** Up to 1M tokens (model capability); tested up to 65K here
+- **Context window:** Up to 1M tokens (model capability); tested up to 128K+ here (sweep in progress)
 
 ## Software
 
