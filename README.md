@@ -26,8 +26,11 @@
 | 51,200   | 183.27        | 10.35            |
 | 67,584   | 178.69        | 10.01            |
 | 83,968   | 174.29        |  9.75            |
+| 100,352  | 170.27        |  9.41            |
+| 116,736  | 166.38        |  9.20            |
+| 131,072  | 158.40        |  8.92            |
 
-> ⏳ *128K sweep in progress — remaining data points (100K, 116K, 131K) incoming. 192K sweep to follow.*
+Full pipelined prefill at 131K: **211.53 t/s** end-to-end (32 chunks, 620s total, 367 MiB/s network throughput).
 
 > The prefill numbers above are per-chunk incremental rates from `ds4-bench`. The full pipelined prefill at 65K context achieved **216.82 t/s** end-to-end thanks to pipeline parallelism across both Sparks.
 
