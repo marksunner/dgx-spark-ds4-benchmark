@@ -36,19 +36,20 @@ From antirez's two-MacBook M5 Max benchmarks (Thunderbolt 5, Q4):
 
 ## Hardware
 
-| Component | Spark 4 (Coordinator) | Spark 6 (Worker) |
+| Component | Spark A (Coordinator) | Spark B (Worker) |
 |-----------|----------------------|-----------------|
 | Hardware | NVIDIA DGX Spark (GB10) | NVIDIA DGX Spark (GB10) |
 | GPU | NVIDIA GB10 (sm_121) | NVIDIA GB10 (sm_121) |
 | Memory | 128 GB unified | 128 GB unified |
 | Network | QSFP 10GbE direct-connect | QSFP 10GbE direct-connect |
-| IP (QSFP) | 10.0.0.4 | 10.0.0.6 |
-| IP (WiFi) | 192.168.1.75 | 192.168.1.85 |
+| IP (QSFP) | 10.0.0.1 | 10.0.0.2 |
 | Ping (QSFP) | 1.4ms round-trip | — |
 
 ### Network
 
-The two Sparks are connected via a **QSFP direct cable** providing a 10 Gigabit Ethernet link. The `enP2p1s0f1np1` interfaces are configured with static IPs on the `10.0.0.0/24` subnet.
+The two Sparks are connected via a **QSFP direct cable** providing a 10 Gigabit Ethernet link. The QSFP interfaces are configured with static IPs on a private subnet (e.g. `10.0.0.0/24`).
+
+> **Use the QSFP/Ethernet IPs for distributed inference**, not WiFi. The 10GbE link has much lower latency and higher bandwidth than WiFi, which directly impacts generation speed (see antirez's network comparison in the ds4 README).
 
 Note: ds4 uses **TCP** for distributed inference (not RDMA/RoCE). antirez explicitly states tensor parallelism is not viable at inter-machine communication speeds — his approach is pipeline parallelism (layer splitting). The QSFP 10GbE link provides low latency (~1.4ms) for the activation transfers.
 
@@ -72,8 +73,8 @@ Note: ds4 uses **TCP** for distributed inference (not RDMA/RoCE). antirez explic
 ds4 splits transformer layers across machines. Each machine loads only its assigned layer slice from the same GGUF file.
 
 **Layer split (43 layers total):**
-- **Coordinator (Spark 4):** Layers 0–20 (21 layers + output head) → 75.64 GiB
-- **Worker (Spark 6):** Layers 21–output (22 layers) → 78.21 GiB
+- **Coordinator (Spark A):** Layers 0–20 (21 layers + output head) → 75.64 GiB
+- **Worker (Spark B):** Layers 21–output (22 layers) → 78.21 GiB
 
 **Launch commands:**
 
@@ -82,16 +83,18 @@ ds4 splits transformer layers across machines. Each machine loads only its assig
 ./ds4 -m ds4flash.gguf \
   --role worker \
   --layers 21:output \
-  --coordinator 10.0.0.4 1234 \
+  --coordinator ${COORDINATOR_IP} 1234 \
   -c 65665
 
 # Coordinator
 ./ds4 -m ds4flash.gguf \
   --role coordinator \
   --layers 0:20 \
-  --listen 10.0.0.4 1234 \
+  --listen ${COORDINATOR_IP} 1234 \
   -c 65665
 ```
+
+Replace `${COORDINATOR_IP}` with the coordinator's QSFP IP address (e.g. `10.0.0.1`).
 
 **Important notes:**
 - The GGUF must exist on both machines (each loads only its slice)
@@ -118,12 +121,14 @@ cd ds4
 # Creates: gguf/DeepSeek-V4-Flash-Q4KExperts-*.gguf (~154 GB)
 ```
 
+You'll need a HuggingFace token with read access. Set it in `~/.cache/huggingface/token`.
+
 ### 3. Copy model to second Spark (if not downloaded separately)
 
 ```bash
-# From Spark 6, copy via QSFP (fast):
-scp castlespark4@10.0.0.4:/home/castlespark4/ds4/gguf/DeepSeek-V4-Flash-Q4K*.gguf \
-    /home/castlespark6/ds4/gguf/
+# From Spark B, copy via QSFP (fast — ~12 GB/min over 10GbE):
+scp ${SPARK_A_USER}@${SPARK_A_QSFP_IP}:~/ds4/gguf/DeepSeek-V4-Flash-Q4K*.gguf \
+    ~/ds4/gguf/
 ```
 
 ### 4. Set up QSFP networking
@@ -131,27 +136,29 @@ scp castlespark4@10.0.0.4:/home/castlespark4/ds4/gguf/DeepSeek-V4-Flash-Q4K*.ggu
 Both Sparks need static IPs on the same subnet on their QSFP interfaces:
 
 ```bash
-# Spark 4:
-sudo ip addr add 10.0.0.4/24 dev enP2p1s0f1np1
-sudo ip link set enP2p1s0f1np1 up
+# Spark A (coordinator):
+sudo ip addr add 10.0.0.1/24 dev <QSFP_INTERFACE>
+sudo ip link set <QSFP_INTERFACE> up
 
-# Spark 6:
-sudo ip addr add 10.0.0.6/24 dev enP2p1s0f1np1
-sudo ip link set enP2p1s0f1np1 up
+# Spark B (worker):
+sudo ip addr add 10.0.0.2/24 dev <QSFP_INTERFACE>
+sudo ip link set <QSFP_INTERFACE> up
 ```
 
-Verify: `ping -c 3 10.0.0.4` from Spark 6 should show ~1.4ms.
+Find your QSFP interface name with `ip link show` — on DGX Spark it's typically `enP2p1s0f1np1`.
+
+Verify: `ping -c 3 10.0.0.1` from Spark B should show ~1.4ms.
 
 ### 5. Run benchmark
 
 ```bash
-# Worker (Spark 6):
+# Worker (Spark B):
 ./ds4 -m ds4flash.gguf --role worker --layers 21:output \
-  --coordinator 10.0.0.4 1234 -c 65665
+  --coordinator ${COORDINATOR_IP} 1234 -c 65665
 
-# Coordinator/Benchmark (Spark 4):
+# Coordinator/Benchmark (Spark A):
 ./ds4-bench -m ds4flash.gguf --role coordinator --layers 0:20 \
-  --listen 10.0.0.4 1234 --ctx-alloc 65665 \
+  --listen ${COORDINATOR_IP} 1234 --ctx-alloc 65665 \
   --prompt-file speed-bench/promessi_sposi.txt \
   --ctx-start 2048 --ctx-max 65536 --step-incr 8192 \
   --gen-tokens 128 --csv results.csv
@@ -162,7 +169,7 @@ Verify: `ping -c 3 10.0.0.4` from Spark 6 should show ~1.4ms.
 ```bash
 # Same worker command, then:
 ./ds4 -m ds4flash.gguf --role coordinator --layers 0:20 \
-  --listen 10.0.0.4 1234 -c 65665
+  --listen ${COORDINATOR_IP} 1234 -c 65665
 # Opens interactive ds4> prompt
 ```
 
@@ -178,7 +185,7 @@ Verify: `ping -c 3 10.0.0.4` from Spark 6 should show ~1.4ms.
 - **Pipelined prefill "accept failed" errors:** The coordinator reports `accept failed: Resource temporarily unavailable` when trying to pipeline multiple prefill chunks. The benchmark recovers gracefully (falls back to non-pipelined), but this likely reduces prefill throughput vs. what's theoretically achievable. May be a Linux/DGX-specific socket timing issue.
 - **Context matching:** Worker `-c` must exactly match or exceed the coordinator's `--ctx-alloc` value. The coordinator's alloc = ctx-max + gen-tokens + 1. Mismatches are rejected at registration time.
 
-### The buy decision (for Nic)
+### The buy decision
 
 **Q4 dual-Spark vs Q2 single-Spark:**
 - Q4 is a significantly better quantisation (less information loss in the routed experts)
@@ -196,8 +203,6 @@ Verify: `ping -c 3 10.0.0.4` from Spark 6 should show ~1.4ms.
 
 - **antirez** (Salvatore Sanfilippo) — ds4 engine, model GGUFs, distributed inference architecture
 - **Nic (albond)** — hybrid INT4+FP8 recipe for Qwen 122B that freed our test Sparks, original question that prompted this benchmark
-- **Mark Sunner** — hardware setup, QSFP cabling, oversight
-- **Tars** — benchmark execution, writeup
 
 ## Raw Data
 
