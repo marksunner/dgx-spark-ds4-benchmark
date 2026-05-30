@@ -44,10 +44,11 @@ Full pipelined prefill at 131K: **211.53 t/s** end-to-end (32 chunks, 620s total
 | 124,928  | 176.22        |  9.01            |
 | 149,504  | 169.67        |  8.63            |
 | 174,080  | 206.19        |  8.26            |
+| 196,608  | 203.18        |  ~7.8            |
 
-Full pipelined prefill at 174K: **206.19 t/s** end-to-end.
+Full pipelined prefill at 196K: **203.18 t/s** end-to-end (48 chunks, 968s total, 216 MiB/s network throughput).
 
-> ⏳ *196K data point in progress — final result incoming.*
+**192K context confirmed working on dual DGX Sparks.** No OOM, no instability. The ds4 pipelined prefill had intermittent socket `accept()` failures during the sweep but recovered on retry — this appears to be a ds4 Linux/DGX bug, not a hardware or memory limitation.
 
 > The prefill numbers above are per-chunk incremental rates from `ds4-bench`. The full pipelined prefill at 65K context achieved **216.82 t/s** end-to-end thanks to pipeline parallelism across both Sparks.
 
