@@ -233,6 +233,40 @@ Verify: `ping -c 3 10.0.0.1` from Spark B should show ~1.4ms.
 
 > ⏳ *Follow-up benchmark sweeps at 128K and 192K context are planned — results will be added here.*
 
+## Real-World Agent Test (Hermes)
+
+We tested ds4-server as a backend for a [Hermes](https://github.com/nousresearch/hermes-agent) AI agent running on Discord, to see how DeepSeek V4 Flash feels in practice as an agent brain.
+
+### Setup
+- **ds4-server** running distributed across both Sparks (coordinator + worker, same layer split as benchmarks)
+- **Hermes Agent** on a separate machine, pointing at ds4-server's OpenAI-compatible API (`/v1/chat/completions`)
+- **Discord bot** for interactive chat
+- Context: 65K tokens
+
+### Configuration gotchas
+- **Environment variable override:** If your agent framework uses env vars (e.g. `CUSTOM_BASE_URL`), these override config file settings. Check both.
+- **Minimum context requirement:** Hermes requires ≥64K context. ds4-server's default is 32K — set `-c 65536` or higher.
+- **Model name:** ds4-server advertises the model as `deepseek-v4-flash` — your agent config must match this exactly.
+
+### Results
+- **It works!** DeepSeek V4 Flash successfully powered a Hermes agent with tool calling via Discord.
+- **Generation speed:** ~11 t/s at low context (first few turns), consistent with benchmarks.
+- **Latency per turn:** **20+ seconds** — too slow for comfortable interactive use. This includes Hermes's system prompt prefill (~16K tokens with tools) plus generation time.
+- **Route instability:** The distributed route dropped mid-conversation due to the same `accept failed: Resource temporarily unavailable` socket bug seen in benchmarks. This caused HTTP 500 errors to the agent. The route can be recovered by restarting the worker, but this makes it unreliable for unattended agent use.
+
+### Verdict for agent use
+
+**Not yet practical for production agent workloads on dual DGX Sparks with 10GbE.** The combination of:
+1. ~20s per-turn latency (prefill + generation)
+2. Intermittent route drops causing 500 errors
+3. No automatic route recovery in ds4-server
+
+...makes it unsuitable for a reliable always-on agent. However:
+- The speed may be acceptable for **batch processing** or **non-interactive workflows**
+- **Thunderbolt 5** connections (0.45ms vs our 1.4ms ping) would significantly improve generation speed — antirez's M5 Max benchmarks show 24.67 t/s vs our ~11 t/s
+- The socket bug is likely fixable in a future ds4 release
+- For interactive agent use, **Qwen 122B on a single Spark** (~41-47 t/s) remains the better choice
+
 ## Credits
 
 - **antirez** (Salvatore Sanfilippo) — ds4 engine, model GGUFs, distributed inference architecture
