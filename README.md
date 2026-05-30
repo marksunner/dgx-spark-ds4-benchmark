@@ -9,10 +9,16 @@
 | 2,048   | 121.93        | 11.36            |
 | 10,240  | 164.55        | 11.21            |
 | 18,432  | 161.69        | 11.09            |
+| 26,624  | 160.19        | 10.88            |
+| 34,816  | 157.76        | 10.45            |
+| 43,008  | 154.96        | 10.34            |
+| 51,200  | 152.86        | 10.18            |
+| 59,392  | 151.19        | 10.04            |
+| 65,536  | 134.97        |  9.91            |
 
-> ⏳ *Benchmark sweep in progress — more data points (up to 65K context) incoming.*
+> The prefill numbers above are per-chunk incremental rates from `ds4-bench`. The full pipelined prefill at 65K context achieved **216.82 t/s** end-to-end thanks to pipeline parallelism across both Sparks.
 
-**Key takeaway:** Prefill scales well with pipeline parallelism (~160+ t/s at longer contexts). Generation is steady at ~11.3 t/s — each token must traverse both machines sequentially, so the network hop is the cost.
+**Key takeaway:** Prefill scales well with pipeline parallelism (122–216 t/s depending on context length and pipeline depth). Generation degrades gracefully from ~11.4 t/s at 2K context to ~9.9 t/s at 65K — each token must traverse both machines sequentially, so the network hop plus growing KV cache is the cost. Still very usable for interactive chat.
 
 ### Comparison Context
 
@@ -21,8 +27,8 @@ From the ds4 README (single DGX Spark, Q2 quant):
 - Generation: **13.75 t/s**
 
 Our dual-Spark Q4 results:
-- Prefill: **122–165 t/s** (pipeline parallelism helps at longer contexts, but coordination overhead is real)
-- Generation: **~11.3 t/s** (19% slower than single-Spark Q2 due to network round-trip)
+- Prefill: **122–217 t/s** (pipeline parallelism helps significantly — 217 t/s end-to-end at 65K)
+- Generation: **9.9–11.4 t/s** (28–19% slower than single-Spark Q2 due to network round-trip + KV cache growth)
 
 From antirez's two-MacBook M5 Max benchmarks (Thunderbolt 5, Q4):
 - Prefill: **582–674 t/s** (Thunderbolt 5 is much faster than 10GbE)
@@ -180,7 +186,11 @@ Verify: `ping -c 3 10.0.0.4` from Spark 6 should show ~1.4ms.
 - Prefill is slower on dual (122–165 t/s vs 343 t/s single) due to coordination overhead on 10GbE
 - But you get the **higher quality Q4 quantisation** which is the real win
 
-**Bottom line:** If quality matters more than raw speed (and at 11+ t/s generation is still very usable for interactive chat), the second Spark is worth it. You get a meaningfully better quantisation at generation speeds that are still perfectly interactive.
+**Bottom line:** If quality matters more than raw speed (and at 10–11 t/s generation is still very usable for interactive chat), the second Spark is worth it. You get a meaningfully better quantisation at generation speeds that are still perfectly interactive.
+
+**Important caveat — vision/images:** ds4 is **text-only**. DeepSeek V4 Flash through ds4 does not support multimodal/image input. If bulk image analysis is a key workload (e.g., processing graphs, maps, infographics at scale), Qwen 122B with vLLM remains the tool for that job. The dual-Spark DS4 setup would complement, not replace, an image analysis pipeline.
+
+> ⏳ *Follow-up benchmark sweeps at 128K and 192K context are planned — results will be added here.*
 
 ## Credits
 
@@ -196,9 +206,23 @@ ctx_tokens,prefill_tokens,prefill_tps,gen_tokens,gen_tps,kvcache_bytes
 2048,2048,121.93,128,11.36,0
 10240,8192,164.55,128,11.21,0
 18432,8192,161.69,128,11.09,0
+26624,8192,160.19,128,10.88,0
+34816,8192,157.76,128,10.45,0
+43008,8192,154.96,128,10.34,0
+51200,8192,152.86,128,10.18,0
+59392,8192,151.19,128,10.04,0
+65536,6144,134.97,128,9.91,0
 ```
 
-*More rows will be added as the benchmark sweep completes.*
+### Pipelined prefill telemetry (65K context)
+
+At 65,536 tokens the coordinator reported:
+```
+pipelined prefill done tokens=65536 chunks=16 total=302.265s 216.82 t/s
+  local=251.771s send=14.080s 290.93 MiB/s
+```
+
+The 14-second send time across 16 chunks at 290 MiB/s shows the 10GbE QSFP link is well-utilised but not the bottleneck — local GPU compute (252s) dominates.
 
 ---
 
